@@ -1,0 +1,12 @@
+name: budget
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pyside6
+  - matplotlib
+  - python-dateutil
+  - pip
+  - pip:
+    - qt-material  # optional: modern Material Design theme for PySide6

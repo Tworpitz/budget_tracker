@@ -1,0 +1,20 @@
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# Packaging output
+packaging/*.deb
+packaging/*.exe
+packaging/deb/opt/
+
+# Python
+__pycache__/
+*.pyc
+
+# Database (user data)
+budget.db
+
+# IDE
+.vscode/
+.idea/

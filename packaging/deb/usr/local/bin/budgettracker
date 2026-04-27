@@ -1,0 +1,3 @@
+#!/bin/bash
+cd /opt/budgettracker
+exec /opt/budgettracker/BudgetTracker "$@"

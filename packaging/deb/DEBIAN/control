@@ -1,0 +1,14 @@
+Package: budgettracker
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.35), libgl1, libegl1, libxkbcommon0, libdbus-1-3, libfontconfig1, libfreetype6, libx11-6
+Maintainer: BudgetTracker <user@example.com>
+Description: 固定资产与生活支出统计软件
+ 记录固定资产折旧、订阅服务管理和一次性开支的个人财务统计工具。
+ 功能：
+  - 固定资产折旧计算（直线法）
+  - 月付/季付/年付订阅管理
+  - 一次性开支记录
+  - 按周/月生成统计报告和图表
