@@ -1,0 +1,15 @@
+#!/bin/bash
+# postinst — 安装后更新桌面数据库和图标缓存
+set -e
+
+# 更新桌面数据库
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database /usr/share/applications || true
+fi
+
+# 更新图标缓存
+if command -v gtk-update-icon-cache &>/dev/null; then
+    gtk-update-icon-cache /usr/share/icons/hicolor/ || true
+fi
+
+echo "BudgetTracker 安装完成。在应用菜单中搜索 'BudgetTracker' 或运行 'budgettracker'。"

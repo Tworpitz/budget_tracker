@@ -1,0 +1,12 @@
+#!/bin/bash
+# postrm — 卸载后清理桌面数据库和图标缓存
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if command -v update-desktop-database &>/dev/null; then
+        update-desktop-database /usr/share/applications || true
+    fi
+    if command -v gtk-update-icon-cache &>/dev/null; then
+        gtk-update-icon-cache /usr/share/icons/hicolor/ || true
+    fi
+fi

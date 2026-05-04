@@ -7,6 +7,7 @@ dependencies:
   - pyside6
   - matplotlib
   - python-dateutil
+  - pyinstaller
   - pip
   - pip:
     - qt-material  # optional: modern Material Design theme for PySide6

@@ -42,21 +42,20 @@ python main.py
 
 ### 打包构建
 
-**Linux 便携版：**
-```bash
-bash build.sh
-# 输出：dist/BudgetTracker/（约 290MB）
-```
+图标会在首次构建时自动生成（也可手动运行：`python packaging/generate_icons.py`）。
 
-**Linux .deb 安装包：**
+**Linux：**
 ```bash
-bash build.sh deb
-# 输出：packaging/*.deb
+bash build.sh              # 便携文件夹 dist/BudgetTracker/
+bash build.sh appimage     # AppImage (需 appimagetool)
+bash build.sh deb          # .deb 安装包
+bash build.sh all          # 以上全部
 ```
 
 **Windows：**
 ```bat
-packaging\build_windows.bat
+build.bat                  # 便携单文件 dist\BudgetTracker.exe
+build.bat installer        # NSIS 安装包 (需 NSIS)
 ```
 
 ## 🏗 项目结构
@@ -65,7 +64,8 @@ packaging\build_windows.bat
 budget_tracker/
 ├── main.py                  # 入口：高 DPI 适配，启动主窗口
 ├── environment.yml          # conda 环境（Python 3.11 + PySide6 + matplotlib）
-├── build.sh                 # Linux 打包脚本
+├── build.sh                 # Linux 构建入口
+├── build.bat                # Windows 构建入口
 │
 ├── db/
 │   ├── __init__.py
@@ -84,16 +84,24 @@ budget_tracker/
 │   └── reports_tab.py       # 统计报告 Tab：汇总卡片 + 表格 + 堆叠柱状图
 │
 ├── packaging/
-│   ├── build_deb.sh         # .deb 打包脚本
-│   ├── build_windows.bat    # Windows 打包脚本
-│   └── deb/                 # Debian 打包文件（control, .desktop, icon）
+│   ├── build_appimage.sh    # AppImage 构建
+│   ├── build_deb.sh         # .deb 构建
+│   ├── installer.nsi        # NSIS 安装包脚本
+│   ├── generate_icons.py    # 图标生成脚本 (SVG → PNG/ICO)
+│   ├── budgettracker.svg    # 应用图标 (SVG)
+│   ├── budgettracker.png    # 应用图标 (256px PNG, 生成)
+│   ├── budgettracker.ico    # 应用图标 (Windows ICO, 生成)
+│   ├── budgettracker.desktop # .desktop 入口文件
+│   └── deb/DEBIAN/          # Debian 打包文件（control, postinst, postrm）
 │
 ├── build/                   # PyInstaller 临时构建文件（gitignored）
 ├── dist/                    # PyInstaller 输出（gitignored）
 │   ├── BudgetTracker.exe    # Windows 可执行文件
 │   └── budget.db            # 用户数据库
 │
-├── budget.spec              # PyInstaller spec 配置
+├── budget.spec              # PyInstaller spec（Linux 文件夹模式）
+├── budget_win.spec          # PyInstaller spec（Windows 单文件模式）
+├── VERSION                  # 版本号单一来源
 ├── .gitignore
 └── README.md
 ```

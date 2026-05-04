@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-BudgetTracker — Linux 文件夹模式打包 spec。
-用法: pyinstaller budget.spec
-输出: dist/BudgetTracker/
+BudgetTracker — Windows 单文件打包 spec。
+用法: pyinstaller budget_win.spec
+输出: dist/BudgetTracker.exe
 """
 
 from PyInstaller.utils.hooks import collect_data_files
@@ -42,28 +42,20 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='BudgetTracker',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='packaging/budgettracker.png',
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='BudgetTracker',
+    icon='packaging/budgettracker.ico',
 )
