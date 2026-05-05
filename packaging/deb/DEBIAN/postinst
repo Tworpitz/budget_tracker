@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # postinst — 安装后更新桌面数据库和图标缓存
 set -e
 

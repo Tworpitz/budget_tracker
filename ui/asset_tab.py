@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QDate, Signal
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
+from config import format_currency, get_setting
 from db.database import (
     add_asset, update_asset, delete_asset,
     get_all_assets, get_asset_by_id,
@@ -35,6 +36,7 @@ class AssetTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._editing_id: int | None = None
+        self._all_rows: list[dict] = []
         self._setup_ui()
         self._load_table()
 
@@ -66,21 +68,21 @@ class AssetTab(QWidget):
 
         self.lifespan_spin = QSpinBox()
         self.lifespan_spin.setRange(1, 600)
-        self.lifespan_spin.setValue(36)
+        self.lifespan_spin.setValue(get_setting("default_lifespan_months", 36))
         self.lifespan_spin.setSuffix(" 个月")
         form_layout.addRow("预期使用月数：", self.lifespan_spin)
 
         self.price_spin = QDoubleSpinBox()
         self.price_spin.setRange(0, 9999999)
         self.price_spin.setDecimals(2)
-        self.price_spin.setPrefix("¥ ")
+        self.price_spin.setPrefix(get_setting("currency", "¥") + " ")
         self.price_spin.setValue(0)
         form_layout.addRow("购买价格：", self.price_spin)
 
         self.salvage_spin = QDoubleSpinBox()
         self.salvage_spin.setRange(0, 9999999)
         self.salvage_spin.setDecimals(2)
-        self.salvage_spin.setPrefix("¥ ")
+        self.salvage_spin.setPrefix(get_setting("currency", "¥") + " ")
         self.salvage_spin.setValue(0)
         self.salvage_spin.setToolTip(
             "残值是指资产在预期使用年限结束后剩余的估计价值。\n"
@@ -114,6 +116,19 @@ class AssetTab(QWidget):
         form_layout.addRow("", btn_layout)
 
         layout.addWidget(form_group)
+
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("搜索："))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("输入关键词筛选...")
+        self.search_edit.textChanged.connect(self._apply_filter)
+        search_layout.addWidget(self.search_edit)
+        self.search_clear_btn = QPushButton("清除")
+        self.search_clear_btn.clicked.connect(self._clear_search)
+        search_layout.addWidget(self.search_clear_btn)
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
 
         # ── 表格区域 ──
         table_group = QGroupBox("固定资产列表")
@@ -161,9 +176,15 @@ class AssetTab(QWidget):
 
     def _load_table(self) -> None:
         """从数据库加载所有固定资产并填充表格。"""
-        assets = get_all_assets()
-        self.table.setRowCount(len(assets))
+        self._all_rows = get_all_assets()
+        self._apply_filter()
 
+    def _apply_filter(self) -> None:
+        keyword = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
+        assets = [a for a in self._all_rows
+                  if not keyword or keyword in a["name"].lower() or keyword in a["category"].lower()]
+
+        self.table.setRowCount(len(assets))
         for row, asset in enumerate(assets):
             monthly = calc_monthly_depreciation(asset)
             accumulated = calc_accumulated_depreciation(asset)
@@ -173,18 +194,18 @@ class AssetTab(QWidget):
             scrap_date = purchase + relativedelta(months=asset["lifespan_months"])
 
             items = [
-                str(asset["id"]),                      # 0: ID
-                asset["name"],                         # 1: 名称
-                asset["category"],                     # 2: 类别
-                asset["purchase_date"],                # 3: 购买日期
-                scrap_date.strftime("%Y-%m-%d"),       # 4: 预期报废
-                f"{asset['lifespan_months']} 个月",    # 5: 使用月数
-                f"¥ {asset['purchase_price']:,.2f}",   # 6: 购买价格
-                f"¥ {asset['salvage_value']:,.2f}",    # 7: 残值
-                f"¥ {monthly:,.2f}",                   # 8: 月折旧额
-                f"¥ {accumulated:,.2f}",               # 9: 累计折旧
-                f"¥ {current_val:,.2f}",               # 10: 当前净值
-                asset.get("notes", ""),                # 11: 备注
+                str(asset["id"]),
+                asset["name"],
+                asset["category"],
+                asset["purchase_date"],
+                scrap_date.strftime("%Y-%m-%d"),
+                f"{asset['lifespan_months']} 个月",
+                format_currency(asset["purchase_price"]),
+                format_currency(asset.get("salvage_value", 0)),
+                format_currency(monthly),
+                format_currency(accumulated),
+                format_currency(current_val),
+                asset.get("notes", ""),
             ]
 
             for col, text in enumerate(items):
@@ -200,6 +221,10 @@ class AssetTab(QWidget):
 
         self.table.resizeColumnsToContents()
 
+    def _clear_search(self) -> None:
+        self.search_edit.clear()
+        self._apply_filter()
+
     # ── 表单操作 ─────────────────────────────────
 
     def _clear_form(self) -> None:
@@ -208,7 +233,7 @@ class AssetTab(QWidget):
         self.name_edit.clear()
         self.category_combo.setCurrentIndex(0)
         self.purchase_date_edit.setDate(QDate.currentDate())
-        self.lifespan_spin.setValue(36)
+        self.lifespan_spin.setValue(get_setting("default_lifespan_months", 36))
         self.price_spin.setValue(0)
         self.salvage_spin.setValue(0)
         self.notes_edit.clear()

@@ -15,24 +15,42 @@ from PySide6.QtCore import Qt, QDate
 import matplotlib
 matplotlib.use("Qt5Agg")
 
-# ── 配置中文字体 ──
+# ── 配置中文字体（优先使用已知可靠的字体） ──
 import matplotlib.font_manager as fm
-_cjk_fonts = [f.name for f in fm.fontManager.ttflist
-              if any(k in f.name for k in ("CJK", "WenKai", "YaHei", "Hei", "Ming", "Song", "UKai", "UMing"))]
-if _cjk_fonts:
-    # 优先选择 SC（简体中文）或包含 "CJK" 的字体
-    _preferred = [f for f in _cjk_fonts if "SC" in f or "CJK" in f]
-    _chosen = (_preferred or _cjk_fonts)[0]
-    matplotlib.rcParams["font.family"] = _chosen
-    # 设置负号正常显示
-    matplotlib.rcParams["axes.unicode_minus"] = False
+import platform
+
+_CJK_CANDIDATES = {
+    "Windows": ["Microsoft YaHei", "SimHei", "SimSun", "KaiTi", "FangSong"],
+    "Darwin": ["PingFang SC", "Heiti SC", "STHeiti", "Songti SC"],
+}.get(platform.system(), ["WenQuanYi Micro Hei", "Noto Sans CJK SC", "Noto Sans SC"])
+
+# 同时扫描系统中实际存在的 CJK 字体作为备选
+_available = {f.name for f in fm.fontManager.ttflist}
+_cjk_found = [f for f in _CJK_CANDIDATES if f in _available]
+
+if _cjk_found:
+    matplotlib.rcParams["font.sans-serif"] = _cjk_found + matplotlib.rcParams.get("font.sans-serif", [])
+    matplotlib.rcParams["font.family"] = "sans-serif"
+else:
+    # 回退：从系统字体中查找任何 CJK 字体
+    _fallback = [f.name for f in fm.fontManager.ttflist
+                 if any(k in f.name for k in ("YaHei", "SimHei", "SimSun", "KaiTi",
+                                               "PingFang", "Heiti", "Songti",
+                                               "Noto Sans CJK", "WenQuanYi"))]
+    if _fallback:
+        matplotlib.rcParams["font.sans-serif"] = _fallback + matplotlib.rcParams.get("font.sans-serif", [])
+        matplotlib.rcParams["font.family"] = "sans-serif"
+
+matplotlib.rcParams["axes.unicode_minus"] = False
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.ticker as mticker
 
+from config import format_currency, get_setting
 from db.database import (
     get_all_assets, get_all_subscriptions, get_expenses_in_range,
+    get_all_recurring,
 )
 from calc.calculations import (
     generate_weekly_stats,
@@ -102,19 +120,34 @@ class ReportsTab(QWidget):
         control_layout.addStretch()
         layout.addWidget(control_group)
 
-        # ── 汇总卡片 ──
-        summary_layout = QHBoxLayout()
-        summary_layout.setSpacing(12)
+        # ── 汇总卡片（两行） ──
+        summary_layout = QVBoxLayout()
+        summary_layout.setSpacing(8)
 
-        self.card_depreciation = self._make_summary_card("折旧费用", "¥ 0.00")
-        self.card_subscriptions = self._make_summary_card("订阅费用", "¥ 0.00")
-        self.card_expenses = self._make_summary_card("一次性开支", "¥ 0.00")
-        self.card_total = self._make_summary_card("合计支出", "¥ 0.00", highlight=True)
+        row1 = QHBoxLayout()
+        row1.setSpacing(12)
+        self.card_depreciation = self._make_summary_card("折旧费用", format_currency(0))
+        self.card_subscriptions = self._make_summary_card("订阅费用", format_currency(0))
+        self.card_expenses = self._make_summary_card("一次性开支", format_currency(0))
+        self.card_recurring_expense = self._make_summary_card("周期性支出", format_currency(0))
+        self.card_total = self._make_summary_card("合计支出", format_currency(0), highlight=True)
+        row1.addWidget(self.card_depreciation)
+        row1.addWidget(self.card_subscriptions)
+        row1.addWidget(self.card_expenses)
+        row1.addWidget(self.card_recurring_expense)
+        row1.addWidget(self.card_total)
+        row1.addStretch()
 
-        summary_layout.addWidget(self.card_depreciation)
-        summary_layout.addWidget(self.card_subscriptions)
-        summary_layout.addWidget(self.card_expenses)
-        summary_layout.addWidget(self.card_total)
+        row2 = QHBoxLayout()
+        row2.setSpacing(12)
+        self.card_recurring_income = self._make_summary_card("周期性收入", format_currency(0))
+        self.card_budget = self._make_summary_card("月度预算", format_currency(0))
+        row2.addWidget(self.card_recurring_income)
+        row2.addWidget(self.card_budget)
+        row2.addStretch()
+
+        summary_layout.addLayout(row1)
+        summary_layout.addLayout(row2)
         layout.addLayout(summary_layout)
 
         # ── 表格 + 图表（左右分栏） ──
@@ -145,32 +178,79 @@ class ReportsTab(QWidget):
 
     # ── 汇总卡片 ─────────────────────────────────
 
+    _CARD_COLORS = {
+        "light": {
+            "normal_bg": "#f5f5f5",
+            "normal_border": "none",
+            "normal_title": "#666",
+            "normal_value": "#333",
+            "highlight_bg": "#e8f5e9",
+            "highlight_border": "2px solid #4CAF50",
+            "highlight_value": "#2e7d32",
+            "danger_bg": "#fce4ec",
+            "danger_border": "2px solid #f44336",
+            "danger_value": "#c62828",
+            "warning_bg": "#fff3e0",
+            "warning_border": "none",
+        },
+        "dark": {
+            "normal_bg": "#2a2a2a",
+            "normal_border": "1px solid #444",
+            "normal_title": "#aaa",
+            "normal_value": "#e0e0e0",
+            "highlight_bg": "#1b3a1b",
+            "highlight_border": "2px solid #4CAF50",
+            "highlight_value": "#81c784",
+            "danger_bg": "#3e1a1a",
+            "danger_border": "2px solid #f44336",
+            "danger_value": "#ef9a9a",
+            "warning_bg": "#3a2e1a",
+            "warning_border": "1px solid #444",
+        },
+    }
+
+    _CHART_COLORS = {
+        "light": {"bg": "#ffffff", "axes_bg": "#fafafa", "text": "#333333", "grid": "#e0e0e0"},
+        "dark": {"bg": "#2d2d2d", "axes_bg": "#252525", "text": "#cccccc", "grid": "#444444"},
+    }
+
+    def _is_dark(self) -> bool:
+        return get_setting("theme", "light") == "dark"
+
     def _make_summary_card(self, title: str, value: str, highlight: bool = False) -> QFrame:
         card = QFrame()
         card.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Raised)
-        card.setStyleSheet(
-            "QFrame { background-color: #f5f5f5; border-radius: 8px; padding: 12px; }"
-            if not highlight else
-            "QFrame { background-color: #e8f5e9; border-radius: 8px; padding: 12px; border: 2px solid #4CAF50; }"
-        )
         card_layout = QVBoxLayout(card)
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 12px; color: #666;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label.setObjectName("card_title")
         value_label = QLabel(value)
-        value_label.setStyleSheet(
-            "font-size: 20px; font-weight: bold; color: #333;" if not highlight
-            else "font-size: 20px; font-weight: bold; color: #2e7d32;"
-        )
         value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        value_label.setObjectName("value_label")
+        value_label.setObjectName("card_value")
         card_layout.addWidget(title_label)
         card_layout.addWidget(value_label)
+        card._highlight = highlight
+        card._card_title = title_label
+        card._card_value = value_label
         return card
+
+    def _apply_card_style(self, card: QFrame, highlight: bool = False, danger: bool = False) -> None:
+        theme = self._CARD_COLORS["dark" if self._is_dark() else "light"]
+        if danger:
+            bg, border, vcolor = theme["danger_bg"], theme["danger_border"], theme["danger_value"]
+        elif highlight:
+            bg, border, vcolor = theme["highlight_bg"], theme["highlight_border"], theme["highlight_value"]
+        else:
+            bg, border, vcolor = theme["normal_bg"], theme["normal_border"], theme["normal_value"]
+        border_css = f"border: {border};" if border != "none" else ""
+        card.setStyleSheet(
+            f"QFrame {{ background-color: {bg}; border-radius: 8px; padding: 12px; {border_css} }}"
+        )
+        card._card_title.setStyleSheet(f"font-size: 12px; color: {theme['normal_title']};")
+        card._card_value.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {vcolor};")
 
     @staticmethod
     def _update_summary_card(card: QFrame, value: str) -> None:
-        """更新汇总卡片数值（第二个 QLabel 始终是数值标签）。"""
         labels = card.findChildren(QLabel)
         if len(labels) >= 2:
             labels[1].setText(value)
@@ -217,15 +297,16 @@ class ReportsTab(QWidget):
         assets = get_all_assets()
         subscriptions = get_all_subscriptions()
         expenses = get_expenses_in_range(start_str, end_str)
+        recurrings = get_all_recurring()
 
         view = self.view_combo.currentText()
 
         if view == "按月统计":
-            stats = generate_monthly_stats(assets, subscriptions, expenses, start, end)
+            stats = generate_monthly_stats(assets, subscriptions, expenses, recurrings, start, end)
             self._display_stats_table(stats, "month")
             self._draw_bar_chart(stats, "month")
         else:
-            stats = generate_weekly_stats(assets, subscriptions, expenses, start, end)
+            stats = generate_weekly_stats(assets, subscriptions, expenses, recurrings, start, end)
             self._display_stats_table(stats, "week")
             self._draw_bar_chart(stats, "week")
 
@@ -233,23 +314,48 @@ class ReportsTab(QWidget):
         total_dep = sum(s["depreciation"] for s in stats)
         total_sub = sum(s["subscriptions"] for s in stats)
         total_exp = sum(s["expenses"] for s in stats)
-        total_all = total_dep + total_sub + total_exp
+        total_rec_exp = sum(s["recurring_expense"] for s in stats)
+        total_rec_inc = sum(s["recurring_income"] for s in stats)
+        total_all = total_dep + total_sub + total_exp + total_rec_exp
 
-        self._update_summary_card(self.card_depreciation, f"¥ {total_dep:,.2f}")
-        self._update_summary_card(self.card_subscriptions, f"¥ {total_sub:,.2f}")
-        self._update_summary_card(self.card_expenses, f"¥ {total_exp:,.2f}")
-        self._update_summary_card(self.card_total, f"¥ {total_all:,.2f}")
+        self._update_summary_card(self.card_depreciation, format_currency(total_dep))
+        self._update_summary_card(self.card_subscriptions, format_currency(total_sub))
+        self._update_summary_card(self.card_expenses, format_currency(total_exp))
+        self._update_summary_card(self.card_recurring_expense, format_currency(total_rec_exp))
+        self._update_summary_card(self.card_recurring_income, format_currency(total_rec_inc))
+        self._update_summary_card(self.card_total, format_currency(total_all))
+
+        # 更新卡片样式（响应主题）
+        self._apply_card_style(self.card_depreciation)
+        self._apply_card_style(self.card_subscriptions)
+        self._apply_card_style(self.card_expenses)
+        self._apply_card_style(self.card_recurring_expense)
+        self._apply_card_style(self.card_recurring_income)
+        self._apply_card_style(self.card_total, highlight=True)
+        self._apply_card_style(self.card_budget)
+
+        # 预算对比
+        budget = get_setting("monthly_budget", 0)
+        if budget > 0:
+            remaining = budget - total_all
+            self._update_summary_card(self.card_budget,
+                                      f"{format_currency(total_all)} / {format_currency(budget)}")
+            if remaining < 0:
+                self._apply_card_style(self.card_total, danger=True)
+                self._apply_card_style(self.card_budget, danger=True)
+        else:
+            self._update_summary_card(self.card_budget, "未设置")
 
     # ── 统计表格 ─────────────────────────────────
 
     def _display_stats_table(self, stats: list[dict], mode: str) -> None:
         """填充统计明细表格。"""
         if mode == "month":
-            headers = ["月份", "折旧费用", "订阅费用", "一次性开支", "合计"]
-            keys = ["month", "depreciation", "subscriptions", "expenses", "total"]
+            headers = ["月份", "折旧费用", "订阅费用", "一次性开支", "周期性支出", "周期性收入", "合计"]
+            keys = ["month", "depreciation", "subscriptions", "expenses", "recurring_expense", "recurring_income", "total"]
         else:
-            headers = ["周", "起止日期", "折旧费用", "订阅费用", "一次性开支", "合计"]
-            keys = ["week", "range", "depreciation", "subscriptions", "expenses", "total"]
+            headers = ["周", "起止日期", "折旧费用", "订阅费用", "一次性开支", "周期性支出", "周期性收入", "合计"]
+            keys = ["week", "range", "depreciation", "subscriptions", "expenses", "recurring_expense", "recurring_income", "total"]
 
         self.stats_table.setColumnCount(len(headers))
         self.stats_table.setHorizontalHeaderLabels(headers)
@@ -259,8 +365,8 @@ class ReportsTab(QWidget):
             for col, key in enumerate(keys):
                 if key == "range":
                     text = f"{s.get('start', '')} ~ {s.get('end', '')}"
-                elif key in ("depreciation", "subscriptions", "expenses", "total"):
-                    text = f"¥ {s[key]:,.2f}"
+                elif key in ("depreciation", "subscriptions", "expenses", "recurring_expense", "recurring_income", "total"):
+                    text = format_currency(s[key])
                 else:
                     text = str(s.get(key, ""))
                 item = QTableWidgetItem(text)
@@ -277,7 +383,18 @@ class ReportsTab(QWidget):
     def _draw_bar_chart(self, stats: list[dict], mode: str) -> None:
         """绘制堆叠柱状图。"""
         self.figure.clear()
+        is_dark = self._is_dark()
+        colors = self._CHART_COLORS["dark" if is_dark else "light"]
+        text_color = colors["text"]
+
         ax = self.figure.add_subplot(111)
+        self.figure.patch.set_facecolor(colors["bg"])
+        ax.set_facecolor(colors["axes_bg"])
+        for spine in ax.spines.values():
+            spine.set_color(colors["grid"])
+        ax.tick_params(colors=text_color)
+        ax.yaxis.label.set_color(text_color)
+        ax.title.set_color(text_color)
 
         if not stats:
             ax.text(0.5, 0.5, "暂无数据", ha="center", va="center",
@@ -294,21 +411,27 @@ class ReportsTab(QWidget):
         dep_vals = [s["depreciation"] for s in stats]
         sub_vals = [s["subscriptions"] for s in stats]
         exp_vals = [s["expenses"] for s in stats]
+        rec_exp_vals = [s["recurring_expense"] for s in stats]
 
         x = range(len(labels))
         width = 0.6
 
-        bar1 = ax.bar(x, dep_vals, width, label="折旧", color="#2196F3")
-        bar2 = ax.bar(x, sub_vals, width, bottom=dep_vals, label="订阅", color="#FF9800")
+        ax.bar(x, dep_vals, width, label="折旧", color="#2196F3")
+        ax.bar(x, sub_vals, width, bottom=dep_vals, label="订阅", color="#FF9800")
         bottom2 = [d + s for d, s in zip(dep_vals, sub_vals)]
-        bar3 = ax.bar(x, exp_vals, width, bottom=bottom2, label="一次性开支", color="#4CAF50")
+        ax.bar(x, exp_vals, width, bottom=bottom2, label="一次性开支", color="#4CAF50")
+        bottom3 = [d + s + e for d, s, e in zip(dep_vals, sub_vals, exp_vals)]
+        ax.bar(x, rec_exp_vals, width, bottom=bottom3, label="周期性支出", color="#9C27B0")
 
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
-        ax.set_ylabel("金额 (¥)")
-        ax.set_title("支出构成趋势" if mode == "month" else "每周支出构成")
-        ax.legend(loc="upper right", fontsize=9)
+        ax.set_ylabel("金额 (¥)", color=text_color)
+        ax.set_title("支出构成趋势" if mode == "month" else "每周支出构成", color=text_color)
         ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"¥{v:,.0f}"))
+        ax.grid(axis="y", color=colors["grid"], linestyle="--", alpha=0.5)
+        ax.legend(loc="upper right", fontsize=9,
+                  facecolor=colors["bg"], edgecolor=colors["grid"],
+                  labelcolor=text_color)
 
         self.figure.tight_layout()
         self.canvas.draw()

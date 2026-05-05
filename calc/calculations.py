@@ -55,48 +55,38 @@ def calc_depreciation_for_period(asset: dict, period_start: date,
                                  period_end: date) -> float:
     """
     计算某项资产在指定时间段内的折旧费用。
-    仅计算资产在使用期内的月份。
+    按天精确计算，逐月累加各月的占用天数比例。
     """
     purchase = datetime.strptime(asset["purchase_date"], "%Y-%m-%d").date()
     lifespan = asset["lifespan_months"]
     end_of_life = purchase + relativedelta(months=lifespan)
     monthly = calc_monthly_depreciation(asset)
 
-    # 确定资产在 period 内的有效区间
     effective_start = max(purchase, period_start)
     effective_end = min(end_of_life, period_end)
 
     if effective_start >= effective_end:
         return 0.0
 
-    # 计算有效月数
-    delta = relativedelta(effective_end, effective_start)
-    months = delta.years * 12 + delta.months
+    total_months = 0.0
+    cursor = effective_start
 
-    # 处理首尾月份的部分折旧（简化：不足一月按比例）
-    # 首月部分
-    if effective_start > purchase and effective_start.day > 1:
-        days_in_month = (
-            effective_start.replace(day=1) + relativedelta(months=1) - timedelta(days=1)
-        ).day
-        first_month_fraction = 1.0 - (effective_start.day - 1) / days_in_month
-        months = months - 1 + first_month_fraction
-    elif effective_start == purchase and purchase.day > 1:
-        days_in_month = (purchase.replace(day=1) + relativedelta(months=1) - timedelta(days=1)).day
-        first_month_fraction = 1.0 - (purchase.day - 1) / days_in_month
-        months = months - 1 + first_month_fraction
+    while cursor < effective_end:
+        # 当月第一天和最后一天
+        month_first = cursor.replace(day=1)
+        month_last = month_first + relativedelta(months=1) - timedelta(days=1)
+        days_in_month = month_last.day
 
-    # 末月部分
-    if effective_end < end_of_life and effective_end.day < (
-        effective_end.replace(day=1) + relativedelta(months=1) - timedelta(days=1)
-    ).day:
-        days_in_last_month = (
-            effective_end.replace(day=1) + relativedelta(months=1) - timedelta(days=1)
-        ).day
-        last_month_fraction = effective_end.day / days_in_last_month
-        months = months - 1 + last_month_fraction
+        # 当前段结束日（不超过 effective_end）
+        segment_end = min(month_last, effective_end)
+        # 当前段起始日
+        segment_start = cursor
+        days_active = (segment_end - segment_start).days + 1
 
-    return round(monthly * max(months, 0), 2)
+        total_months += days_active / days_in_month
+        cursor = segment_end + timedelta(days=1)
+
+    return round(monthly * total_months, 2)
 
 
 # ──────────────────────────────────────────────
@@ -157,13 +147,26 @@ def get_month_range(month_offset: int = 0) -> tuple[date, date]:
     return first_day, last_day
 
 
+def _calc_monthly_recurring_cost(rec: dict) -> float:
+    """将周期性收支折算为每月金额。"""
+    cycle = rec["cycle"]
+    amount = rec["amount"]
+    if cycle == "monthly":
+        return amount
+    elif cycle == "quarterly":
+        return amount / 3
+    elif cycle == "yearly":
+        return amount / 12
+    return amount
+
+
 def generate_weekly_stats(assets: list[dict], subscriptions: list[dict],
-                          expenses: list[dict], start_date: date,
-                          end_date: date) -> list[dict]:
+                          expenses: list[dict], recurrings: list[dict],
+                          start_date: date, end_date: date) -> list[dict]:
     """生成按周汇总的统计数据。"""
-    # 将 expenses 按周分组
     weekly_data: dict[str, dict] = defaultdict(
-        lambda: {"depreciation": 0.0, "subscriptions": 0.0, "expenses": 0.0}
+        lambda: {"depreciation": 0.0, "subscriptions": 0.0, "expenses": 0.0,
+                 "recurring_income": 0.0, "recurring_expense": 0.0}
     )
 
     # 计算每周折旧
@@ -204,6 +207,25 @@ def generate_weekly_stats(assets: list[dict], subscriptions: list[dict],
                 ).isoformat()
             current += timedelta(days=7)
 
+    # 周期性收支按周分摊
+    for rec in recurrings:
+        monthly_cost = _calc_monthly_recurring_cost(rec)
+        weekly_cost = monthly_cost / 4.345
+        rec_start = datetime.strptime(rec["start_date"], "%Y-%m-%d").date()
+        field = "recurring_income" if rec["type"] == "income" else "recurring_expense"
+
+        current = max(rec_start, start_date)
+        while current <= end_date:
+            week_key = f"{current.year}-W{current.isocalendar()[1]:02d}"
+            weekly_data[week_key][field] += round(weekly_cost, 2)
+            if "_start" not in weekly_data[week_key]:
+                week_start = current - timedelta(days=current.weekday())
+                weekly_data[week_key]["_start"] = week_start.isoformat()
+                weekly_data[week_key]["_end"] = (
+                    week_start + timedelta(days=6)
+                ).isoformat()
+            current += timedelta(days=7)
+
     # 一次性开支直接归入对应周
     for exp in expenses:
         exp_date = datetime.strptime(exp["expense_date"], "%Y-%m-%d").date()
@@ -221,7 +243,7 @@ def generate_weekly_stats(assets: list[dict], subscriptions: list[dict],
     result = []
     for week_key in sorted(weekly_data.keys()):
         d = weekly_data[week_key]
-        total = d["depreciation"] + d["subscriptions"] + d["expenses"]
+        total = d["depreciation"] + d["subscriptions"] + d["expenses"] + d["recurring_expense"]
         result.append({
             "week": week_key,
             "start": d.get("_start", ""),
@@ -229,6 +251,8 @@ def generate_weekly_stats(assets: list[dict], subscriptions: list[dict],
             "depreciation": round(d["depreciation"], 2),
             "subscriptions": round(d["subscriptions"], 2),
             "expenses": round(d["expenses"], 2),
+            "recurring_expense": round(d["recurring_expense"], 2),
+            "recurring_income": round(d["recurring_income"], 2),
             "total": round(total, 2),
         })
 
@@ -236,11 +260,12 @@ def generate_weekly_stats(assets: list[dict], subscriptions: list[dict],
 
 
 def generate_monthly_stats(assets: list[dict], subscriptions: list[dict],
-                           expenses: list[dict], start_date: date,
-                           end_date: date) -> list[dict]:
+                           expenses: list[dict], recurrings: list[dict],
+                           start_date: date, end_date: date) -> list[dict]:
     """生成按月汇总的统计数据。"""
     monthly_data: dict[str, dict] = defaultdict(
-        lambda: {"depreciation": 0.0, "subscriptions": 0.0, "expenses": 0.0}
+        lambda: {"depreciation": 0.0, "subscriptions": 0.0, "expenses": 0.0,
+                 "recurring_income": 0.0, "recurring_expense": 0.0}
     )
 
     # 计算每月折旧
@@ -286,6 +311,18 @@ def generate_monthly_stats(assets: list[dict], subscriptions: list[dict],
             monthly_data[month_key]["subscriptions"] += round(monthly_cost, 2)
             current += relativedelta(months=1)
 
+    # 周期性收支
+    for rec in recurrings:
+        monthly_cost = _calc_monthly_recurring_cost(rec)
+        rec_start = datetime.strptime(rec["start_date"], "%Y-%m-%d").date()
+        field = "recurring_income" if rec["type"] == "income" else "recurring_expense"
+
+        current = max(rec_start.replace(day=1), start_date.replace(day=1))
+        while current <= end_date:
+            month_key = current.strftime("%Y-%m")
+            monthly_data[month_key][field] += round(monthly_cost, 2)
+            current += relativedelta(months=1)
+
     # 一次性开支
     for exp in expenses:
         exp_date = datetime.strptime(exp["expense_date"], "%Y-%m-%d").date()
@@ -297,12 +334,14 @@ def generate_monthly_stats(assets: list[dict], subscriptions: list[dict],
     result = []
     for month_key in sorted(monthly_data.keys()):
         d = monthly_data[month_key]
-        total = d["depreciation"] + d["subscriptions"] + d["expenses"]
+        total = d["depreciation"] + d["subscriptions"] + d["expenses"] + d["recurring_expense"]
         result.append({
             "month": month_key,
             "depreciation": round(d["depreciation"], 2),
             "subscriptions": round(d["subscriptions"], 2),
             "expenses": round(d["expenses"], 2),
+            "recurring_expense": round(d["recurring_expense"], 2),
+            "recurring_income": round(d["recurring_income"], 2),
             "total": round(total, 2),
         })
 

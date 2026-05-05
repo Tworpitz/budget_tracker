@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # postrm — 卸载后清理桌面数据库和图标缓存
 set -e
 

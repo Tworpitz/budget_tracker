@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ============================================================
 #  BudgetTracker .deb 打包脚本
 #  前提: 先运行 build.sh 生成 dist/BudgetTracker/

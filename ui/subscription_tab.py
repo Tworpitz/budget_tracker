@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QDate, Signal
 
+from config import format_currency, get_setting
 from db.database import (
     add_subscription, update_subscription, delete_subscription,
     get_all_subscriptions, get_subscription_by_id,
@@ -32,6 +33,7 @@ class SubscriptionTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._editing_id: int | None = None
+        self._all_rows: list[dict] = []
         self._setup_ui()
         self._load_table()
 
@@ -64,7 +66,7 @@ class SubscriptionTab(QWidget):
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0, 9999999)
         self.amount_spin.setDecimals(2)
-        self.amount_spin.setPrefix("¥ ")
+        self.amount_spin.setPrefix(get_setting("currency", "¥") + " ")
         self.amount_spin.setValue(0)
         form_layout.addRow("金额：", self.amount_spin)
 
@@ -93,6 +95,19 @@ class SubscriptionTab(QWidget):
         form_layout.addRow("", btn_layout)
 
         layout.addWidget(form_group)
+
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("搜索："))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("输入关键词筛选...")
+        self.search_edit.textChanged.connect(self._apply_filter)
+        search_layout.addWidget(self.search_edit)
+        self.search_clear_btn = QPushButton("清除")
+        self.search_clear_btn.clicked.connect(self._clear_search)
+        search_layout.addWidget(self.search_clear_btn)
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
 
         # ── 表格 ──
         table_group = QGroupBox("订阅服务列表")
@@ -139,9 +154,15 @@ class SubscriptionTab(QWidget):
 
     def _load_table(self) -> None:
         """加载所有订阅服务。"""
-        subs = get_all_subscriptions()
-        self.table.setRowCount(len(subs))
+        self._all_rows = get_all_subscriptions()
+        self._apply_filter()
 
+    def _apply_filter(self) -> None:
+        keyword = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
+        subs = [s for s in self._all_rows
+                if not keyword or keyword in s["service_name"].lower()]
+
+        self.table.setRowCount(len(subs))
         for row, sub in enumerate(subs):
             monthly_cost = calc_monthly_subscription_cost(sub)
             next_billing = calc_next_billing_date(sub)
@@ -151,8 +172,8 @@ class SubscriptionTab(QWidget):
                 sub["service_name"],
                 sub["start_date"],
                 BILLING_CYCLE_LABELS.get(sub["billing_cycle"], sub["billing_cycle"]),
-                f"¥ {sub['amount']:,.2f}",
-                f"¥ {monthly_cost:,.2f}",
+                format_currency(sub["amount"]),
+                format_currency(monthly_cost),
                 next_billing.strftime("%Y-%m-%d"),
                 sub.get("notes", ""),
             ]
@@ -166,6 +187,10 @@ class SubscriptionTab(QWidget):
                 self.table.setItem(row, col, item)
 
         self.table.resizeColumnsToContents()
+
+    def _clear_search(self) -> None:
+        self.search_edit.clear()
+        self._apply_filter()
 
     # ── 表单操作 ─────────────────────────────────
 

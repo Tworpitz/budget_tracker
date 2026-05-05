@@ -1,16 +1,16 @@
 ; ============================================================
-;  BudgetTracker Windows å®‰è£…åŒ… â€” NSIS è„šæœ¬
-;  ç”¨æ³•: makensis /DVERSION=1.0.0 packaging\installer.nsi
-;  è¾“å‡º: dist\BudgetTracker-${VERSION}-setup.exe
+;  BudgetTracker Windows Installer ¡ª NSIS script
+;  Usage: makensis /DVERSION=1.0.0 packaging\installer.nsi
+;  Output: dist\BudgetTracker-${VERSION}-setup.exe
 ; ============================================================
 
 !ifndef VERSION
   !define VERSION "1.0.0"
 !endif
 
-; â”€â”€â”€ åŸºç¡€é…ç½® â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+; ¡ª¡ª¡ª Basic config ¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
 Name "BudgetTracker"
-OutFile "dist\BudgetTracker-${VERSION}-setup.exe"
+OutFile "..\dist\BudgetTracker-${VERSION}-setup.exe"
 InstallDir "$PROGRAMFILES\BudgetTracker"
 InstallDirRegKey HKLM "Software\BudgetTracker" "InstallDir"
 RequestExecutionLevel admin
@@ -18,12 +18,12 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 
-; â”€â”€â”€ ç•Œé¢ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+; ¡ª¡ª¡ª UI ¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
 !include "MUI2.nsh"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "dist\installer\budgettracker.ico"
-!define MUI_UNICON "dist\installer\budgettracker.ico"
+!define MUI_ICON "..\dist\installer\budgettracker.ico"
+!define MUI_UNICON "..\dist\installer\budgettracker.ico"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -36,24 +36,21 @@ SetCompressorDictSize 64
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
-; â”€â”€â”€ å®‰è£… â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+; ¡ª¡ª¡ª Install ¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
 Section "Install"
   SetOutPath "$INSTDIR"
 
-  File "dist\installer\BudgetTracker.exe"
+  File "..\dist\installer\BudgetTracker.exe"
 
-  ; å¼€å§‹èœå•å¿«æ·æ–¹å¼
   CreateDirectory "$SMPROGRAMS\BudgetTracker"
   CreateShortcut "$SMPROGRAMS\BudgetTracker\BudgetTracker.lnk" "$INSTDIR\BudgetTracker.exe"
   CreateShortcut "$SMPROGRAMS\BudgetTracker\Uninstall.lnk" "$INSTDIR\uninstall.exe"
 
-  ; æ¡Œé¢å¿«æ·æ–¹å¼
   CreateShortcut "$DESKTOP\BudgetTracker.lnk" "$INSTDIR\BudgetTracker.exe"
 
-  ; å†™å…¥å¸è½½ä¿¡æ¯
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BudgetTracker" \
-    "DisplayName" "BudgetTracker - å›ºå®šèµ„äº§ä¸ç”Ÿæ´»æ”¯å‡ºç»Ÿè®¡"
+    "DisplayName" "BudgetTracker"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BudgetTracker" \
     "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BudgetTracker" \
@@ -72,7 +69,7 @@ Section "Install"
   WriteRegStr HKLM "Software\BudgetTracker" "InstallDir" "$INSTDIR"
 SectionEnd
 
-; â”€â”€â”€ å¸è½½ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+; ¡ª¡ª¡ª Uninstall ¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª¡ª
 Section "Uninstall"
   Delete "$INSTDIR\BudgetTracker.exe"
   Delete "$INSTDIR\uninstall.exe"

@@ -1,5 +1,5 @@
 """
-一次性开支 Tab — 记录吃饭、送礼等非固定支出。
+周期性收支 Tab — 管理工资、房租等固定周期收支。
 """
 
 from PySide6.QtWidgets import (
@@ -13,15 +13,18 @@ from PySide6.QtCore import Qt, QDate, Signal
 
 from config import format_currency, get_setting
 from db.database import (
-    add_expense, update_expense, delete_expense,
-    get_all_expenses, get_expense_by_id,
+    add_recurring, update_recurring, delete_recurring,
+    get_all_recurring, get_recurring_by_id,
 )
 
-EXPENSE_CATEGORIES = ["餐饮", "礼物", "旅行", "医疗", "教育", "娱乐", "交通", "日用", "服饰", "住房", "其他"]
+CYCLES = ["monthly", "quarterly", "yearly"]
+CYCLE_LABELS = {"monthly": "月付", "quarterly": "季付", "yearly": "年付"}
+TYPE_LABELS = {"income": "收入", "expense": "支出"}
+RECUR_CATEGORIES = ["工资", "房租", "水电", "保险", "贷款", "投资", "其他"]
 
 
-class ExpenseTab(QWidget):
-    """一次性开支管理页面。"""
+class RecurringTab(QWidget):
+    """周期性收支管理页面。"""
 
     data_changed = Signal()
 
@@ -32,37 +35,45 @@ class ExpenseTab(QWidget):
         self._setup_ui()
         self._load_table()
 
-    # ── UI 构建 ─────────────────────────────────
-
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        # ── 表单 ──
-        form_group = QGroupBox("记录一次性开支")
+        # 表单
+        form_group = QGroupBox("添加 / 编辑周期性收支")
         form_layout = QFormLayout(form_group)
         form_layout.setSpacing(8)
 
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("例如：朋友聚餐、生日礼物")
+        self.name_edit.setPlaceholderText("例如：工资、房租")
         form_layout.addRow("名称：", self.name_edit)
 
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("支出", "expense")
+        self.type_combo.addItem("收入", "income")
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+        form_layout.addRow("类型：", self.type_combo)
+
         self.category_combo = QComboBox()
-        self.category_combo.addItems(EXPENSE_CATEGORIES)
+        self.category_combo.addItems(RECUR_CATEGORIES)
         self.category_combo.setEditable(True)
         form_layout.addRow("类别：", self.category_combo)
 
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDate(QDate.currentDate())
-        self.date_edit.setDisplayFormat("yyyy-MM-dd")
-        form_layout.addRow("日期：", self.date_edit)
+        self.cycle_combo = QComboBox()
+        for c in CYCLES:
+            self.cycle_combo.addItem(CYCLE_LABELS[c], c)
+        form_layout.addRow("周期：", self.cycle_combo)
+
+        self.start_date_edit = QDateEdit()
+        self.start_date_edit.setCalendarPopup(True)
+        self.start_date_edit.setDate(QDate.currentDate())
+        self.start_date_edit.setDisplayFormat("yyyy-MM-dd")
+        form_layout.addRow("开始日期：", self.start_date_edit)
 
         self.amount_spin = QDoubleSpinBox()
         self.amount_spin.setRange(0, 9999999)
         self.amount_spin.setDecimals(2)
         self.amount_spin.setPrefix(get_setting("currency", "¥") + " ")
-        self.amount_spin.setValue(0)
         form_layout.addRow("金额：", self.amount_spin)
 
         self.notes_edit = QTextEdit()
@@ -103,25 +114,24 @@ class ExpenseTab(QWidget):
         search_layout.addStretch()
         layout.addLayout(search_layout)
 
-        # ── 表格 ──
-        table_group = QGroupBox("开支列表")
+        # 表格
+        table_group = QGroupBox("周期性收支列表")
         table_layout = QVBoxLayout(table_group)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            "ID", "名称", "类别", "日期", "金额", "备注",
+            "ID", "名称", "类型", "类别", "周期", "金额", "开始日期", "备注",
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.setColumnHidden(0, True)
-        # 列宽策略：内容自适应 + 备注列拉伸
         header = self.table.horizontalHeader()
-        for col in range(1, 5):
+        for col in range(1, 7):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.table.itemDoubleClicked.connect(self._on_row_double_clicked)
 
         table_layout.addWidget(self.table)
@@ -134,7 +144,6 @@ class ExpenseTab(QWidget):
         self.delete_btn.clicked.connect(self._on_delete_selected)
         self.refresh_btn = QPushButton("刷新列表")
         self.refresh_btn.clicked.connect(self._load_table)
-
         tbl_btn_layout.addWidget(self.edit_btn)
         tbl_btn_layout.addWidget(self.delete_btn)
         tbl_btn_layout.addWidget(self.refresh_btn)
@@ -143,43 +152,48 @@ class ExpenseTab(QWidget):
 
         layout.addWidget(table_group)
 
-    # ── 表格加载 ─────────────────────────────────
-
     def _load_table(self) -> None:
-        self._all_rows = get_all_expenses()
+        self._all_rows = get_all_recurring()
         self._apply_filter()
 
     def _apply_filter(self) -> None:
         keyword = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
-        expenses = [e for e in self._all_rows
-                    if not keyword or keyword in e["name"].lower() or keyword in e["category"].lower()]
+        rows = [r for r in self._all_rows
+                if not keyword or keyword in r["name"].lower() or keyword in r["category"].lower()]
 
-        self.table.setRowCount(len(expenses))
-        for row, exp in enumerate(expenses):
+        self.table.setRowCount(len(rows))
+        for row, rec in enumerate(rows):
             items = [
-                str(exp["id"]),
-                exp["name"],
-                exp["category"],
-                exp["expense_date"],
-                format_currency(exp["amount"]),
-                exp.get("notes", ""),
+                str(rec["id"]),
+                rec["name"],
+                TYPE_LABELS.get(rec["type"], rec["type"]),
+                rec["category"],
+                CYCLE_LABELS.get(rec["cycle"], rec["cycle"]),
+                format_currency(rec["amount"]),
+                rec["start_date"],
+                rec.get("notes", ""),
             ]
             for col, text in enumerate(items):
-                self.table.setItem(row, col, QTableWidgetItem(text))
-
+                item = QTableWidgetItem(text)
+                if col == 2:
+                    if rec["type"] == "income":
+                        item.setForeground(Qt.GlobalColor.darkGreen)
+                    else:
+                        item.setForeground(Qt.GlobalColor.darkRed)
+                self.table.setItem(row, col, item)
         self.table.resizeColumnsToContents()
 
     def _clear_search(self) -> None:
         self.search_edit.clear()
         self._apply_filter()
 
-    # ── 表单操作 ─────────────────────────────────
-
     def _clear_form(self) -> None:
         self._editing_id = None
         self.name_edit.clear()
+        self.type_combo.setCurrentIndex(0)
         self.category_combo.setCurrentIndex(0)
-        self.date_edit.setDate(QDate.currentDate())
+        self.cycle_combo.setCurrentIndex(0)
+        self.start_date_edit.setDate(QDate.currentDate())
         self.amount_spin.setValue(0)
         self.notes_edit.clear()
         self.add_btn.setText("添加")
@@ -187,15 +201,17 @@ class ExpenseTab(QWidget):
     def _get_form_data(self) -> dict:
         return {
             "name": self.name_edit.text().strip(),
+            "rtype": self.type_combo.currentData(),
             "category": self.category_combo.currentText().strip(),
-            "expense_date": self.date_edit.date().toString("yyyy-MM-dd"),
+            "cycle": self.cycle_combo.currentData(),
             "amount": self.amount_spin.value(),
+            "start_date": self.start_date_edit.date().toString("yyyy-MM-dd"),
             "notes": self.notes_edit.toPlainText().strip(),
         }
 
     def _validate_form(self, data: dict) -> bool:
         if not data["name"]:
-            QMessageBox.warning(self, "提示", "请输入开支名称。")
+            QMessageBox.warning(self, "提示", "请输入名称。")
             self.name_edit.setFocus()
             return False
         if data["amount"] <= 0:
@@ -208,7 +224,7 @@ class ExpenseTab(QWidget):
         data = self._get_form_data()
         if not self._validate_form(data):
             return
-        add_expense(**data)
+        add_recurring(**data)
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -220,12 +236,16 @@ class ExpenseTab(QWidget):
         data = self._get_form_data()
         if not self._validate_form(data):
             return
-        update_expense(self._editing_id, **data)
+        update_recurring(self._editing_id, **data)
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
 
-    # ── 表格交互 ─────────────────────────────────
+    def _on_type_changed(self) -> None:
+        if self.type_combo.currentData() == "income":
+            self.amount_spin.setPrefix(get_setting("currency", "¥") + " +")
+        else:
+            self.amount_spin.setPrefix(get_setting("currency", "¥") + " ")
 
     def _get_selected_id(self) -> int | None:
         selected = self.table.selectedItems()
@@ -234,22 +254,26 @@ class ExpenseTab(QWidget):
         return int(self.table.item(selected[0].row(), 0).text())
 
     def _populate_form_from_row(self, row: int) -> None:
-        exp_id = int(self.table.item(row, 0).text())
-        exp = get_expense_by_id(exp_id)
-        if not exp:
+        rec_id = int(self.table.item(row, 0).text())
+        rec = get_recurring_by_id(rec_id)
+        if not rec:
             return
-        self._editing_id = exp_id
-        self.name_edit.setText(exp["name"])
-        idx = self.category_combo.findText(exp["category"])
+        self._editing_id = rec_id
+        self.name_edit.setText(rec["name"])
+        idx = self.type_combo.findData(rec["type"])
+        if idx >= 0:
+            self.type_combo.setCurrentIndex(idx)
+        idx = self.category_combo.findText(rec["category"])
         if idx >= 0:
             self.category_combo.setCurrentIndex(idx)
         else:
-            self.category_combo.setEditText(exp["category"])
-        self.date_edit.setDate(
-            QDate.fromString(exp["expense_date"], "yyyy-MM-dd")
-        )
-        self.amount_spin.setValue(exp["amount"])
-        self.notes_edit.setPlainText(exp.get("notes", ""))
+            self.category_combo.setEditText(rec["category"])
+        idx = self.cycle_combo.findData(rec["cycle"])
+        if idx >= 0:
+            self.cycle_combo.setCurrentIndex(idx)
+        self.start_date_edit.setDate(QDate.fromString(rec["start_date"], "yyyy-MM-dd"))
+        self.amount_spin.setValue(rec["amount"])
+        self.notes_edit.setPlainText(rec.get("notes", ""))
         self.add_btn.setText("添加（当前为编辑模式）")
 
     def _on_row_double_clicked(self, item: QTableWidgetItem) -> None:
@@ -263,18 +287,17 @@ class ExpenseTab(QWidget):
         self._populate_form_from_row(selected[0].row())
 
     def _on_delete_selected(self) -> None:
-        exp_id = self._get_selected_id()
-        if exp_id is None:
+        rec_id = self._get_selected_id()
+        if rec_id is None:
             QMessageBox.information(self, "提示", "请先在表格中选中一行。")
             return
         reply = QMessageBox.question(
-            self, "确认删除",
-            "确定要删除该开支记录吗？",
+            self, "确认删除", "确定要删除该记录吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            delete_expense(exp_id)
+            delete_recurring(rec_id)
             self._clear_form()
             self._load_table()
             self.data_changed.emit()
