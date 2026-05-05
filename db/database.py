@@ -56,7 +56,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """初始化数据库：创建所有表。"""
+    """初始化数据库：创建所有表并执行迁移。"""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -77,6 +77,7 @@ def init_db() -> None:
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             service_name    TEXT    NOT NULL,
             start_date      TEXT    NOT NULL,  -- YYYY-MM-DD
+            end_date        TEXT    NOT NULL DEFAULT '',  -- YYYY-MM-DD, empty if ongoing
             billing_cycle   TEXT    NOT NULL,  -- monthly / quarterly / yearly
             amount          REAL    NOT NULL,
             notes           TEXT    NOT NULL DEFAULT '',
@@ -105,6 +106,12 @@ def init_db() -> None:
             created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
         );
     """)
+
+    # 迁移：为旧数据库添加 end_date 列
+    cols = conn.execute("PRAGMA table_info(subscriptions)").fetchall()
+    col_names = [c[1] for c in cols]
+    if "end_date" not in col_names:
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN end_date TEXT NOT NULL DEFAULT ''")
 
     conn.commit()
     conn.close()
@@ -179,13 +186,13 @@ def get_asset_by_id(asset_id: int) -> Optional[dict]:
 # ──────────────────────────────────────────────
 
 def add_subscription(service_name: str, start_date: str, billing_cycle: str,
-                     amount: float, notes: str = "") -> int:
+                     amount: float, notes: str = "", end_date: str = "") -> int:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO subscriptions (service_name, start_date, billing_cycle, amount, notes)
-        VALUES (?, ?, ?, ?, ?)
-    """, (service_name, start_date, billing_cycle, amount, notes))
+        INSERT INTO subscriptions (service_name, start_date, end_date, billing_cycle, amount, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (service_name, start_date, end_date, billing_cycle, amount, notes))
     conn.commit()
     row_id = cur.lastrowid
     conn.close()
@@ -193,13 +200,14 @@ def add_subscription(service_name: str, start_date: str, billing_cycle: str,
 
 
 def update_subscription(sub_id: int, service_name: str, start_date: str,
-                        billing_cycle: str, amount: float, notes: str = "") -> None:
+                        billing_cycle: str, amount: float, notes: str = "",
+                        end_date: str = "") -> None:
     conn = get_connection()
     conn.execute("""
         UPDATE subscriptions
-        SET service_name=?, start_date=?, billing_cycle=?, amount=?, notes=?
+        SET service_name=?, start_date=?, end_date=?, billing_cycle=?, amount=?, notes=?
         WHERE id=?
-    """, (service_name, start_date, billing_cycle, amount, notes, sub_id))
+    """, (service_name, start_date, end_date, billing_cycle, amount, notes, sub_id))
     conn.commit()
     conn.close()
 
@@ -214,7 +222,7 @@ def delete_subscription(sub_id: int) -> None:
 def get_all_subscriptions() -> list[dict]:
     conn = get_connection()
     rows = conn.execute("""
-        SELECT id, service_name, start_date, billing_cycle, amount, notes
+        SELECT id, service_name, start_date, end_date, billing_cycle, amount, notes
         FROM subscriptions
         ORDER BY start_date DESC
     """).fetchall()
@@ -391,7 +399,7 @@ def export_to_csv(filepath: str) -> None:
         writer.writerow(["_type", "id", "name", "category", "purchase_date",
                          "lifespan_months", "purchase_price", "salvage_value",
                          "start_date", "billing_cycle", "amount",
-                         "expense_date", "transaction_type", "notes"])
+                         "expense_date", "transaction_type", "notes", "end_date"])
         for a in get_all_assets():
             writer.writerow(["asset", a["id"], a["name"], a["category"],
                             a["purchase_date"], a["lifespan_months"],
@@ -402,7 +410,7 @@ def export_to_csv(filepath: str) -> None:
             writer.writerow(["subscription", s["id"], s["service_name"], "",
                             s["start_date"], "", "", "",
                             s["start_date"], s["billing_cycle"], s["amount"],
-                            "", "", s.get("notes", "")])
+                            "", "", s.get("notes", ""), s.get("end_date", "")])
 
         for e in get_all_expenses():
             writer.writerow(["expense", e["id"], e["name"], e["category"],
@@ -448,6 +456,7 @@ def import_from_csv(filepath: str) -> int:
                     billing_cycle=row.get("billing_cycle", "monthly").strip() or "monthly",
                     amount=float(row.get("amount", 0) or 0),
                     notes=notes,
+                    end_date=row.get("end_date", "").strip(),
                 )
                 count += 1
             elif rtype == "expense":

@@ -106,8 +106,14 @@ def calc_monthly_subscription_cost(sub: dict) -> float:
     return amount
 
 
-def calc_next_billing_date(sub: dict) -> date:
-    """计算下一次扣费日期。"""
+def calc_next_billing_date(sub: dict) -> Optional[date]:
+    """计算下一次扣费日期。若订阅已结束则返回 None。"""
+    end_date_str = sub.get("end_date", "")
+    if end_date_str:
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        if end_date <= date.today():
+            return None
+
     start = datetime.strptime(sub["start_date"], "%Y-%m-%d").date()
     today = date.today()
     cycle = sub["billing_cycle"]
@@ -124,6 +130,13 @@ def calc_next_billing_date(sub: dict) -> date:
     next_date = start
     while next_date <= today:
         next_date += delta
+
+    # 如果下次扣费日期超过了结束日期，返回 None
+    if end_date_str:
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        if next_date > end_date:
+            return None
+
     return next_date
 
 
@@ -192,11 +205,17 @@ def generate_weekly_stats(assets: list[dict], subscriptions: list[dict],
         monthly_cost = calc_monthly_subscription_cost(sub)
         weekly_cost = monthly_cost / 4.345  # 平均每月周数
 
-        current = max(
-            datetime.strptime(sub["start_date"], "%Y-%m-%d").date(),
-            start_date
-        )
-        while current <= end_date:
+        sub_start = datetime.strptime(sub["start_date"], "%Y-%m-%d").date()
+        current = max(sub_start, start_date)
+
+        # 如果订阅已结束，截止到结束日期
+        sub_end_str = sub.get("end_date", "")
+        effective_end = end_date
+        if sub_end_str:
+            sub_end = datetime.strptime(sub_end_str, "%Y-%m-%d").date()
+            effective_end = min(end_date, sub_end)
+
+        while current <= effective_end:
             week_key = f"{current.year}-W{current.isocalendar()[1]:02d}"
             weekly_data[week_key]["subscriptions"] += round(weekly_cost, 2)
             if "_start" not in weekly_data[week_key]:
@@ -305,8 +324,14 @@ def generate_monthly_stats(assets: list[dict], subscriptions: list[dict],
         monthly_cost = calc_monthly_subscription_cost(sub)
         sub_start = datetime.strptime(sub["start_date"], "%Y-%m-%d").date()
 
+        sub_end_str = sub.get("end_date", "")
+        effective_end = end_date
+        if sub_end_str:
+            sub_end = datetime.strptime(sub_end_str, "%Y-%m-%d").date()
+            effective_end = min(end_date, sub_end)
+
         current = max(sub_start.replace(day=1), start_date.replace(day=1))
-        while current <= end_date:
+        while current <= effective_end:
             month_key = current.strftime("%Y-%m")
             monthly_data[month_key]["subscriptions"] += round(monthly_cost, 2)
             current += relativedelta(months=1)

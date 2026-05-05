@@ -5,7 +5,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QLabel, QLineEdit, QComboBox, QDateEdit,
-    QDoubleSpinBox, QTextEdit, QPushButton,
+    QDoubleSpinBox, QTextEdit, QPushButton, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QAbstractItemView,
 )
@@ -57,6 +57,20 @@ class SubscriptionTab(QWidget):
         self.start_date_edit.setDate(QDate.currentDate())
         self.start_date_edit.setDisplayFormat("yyyy-MM-dd")
         form_layout.addRow("开始日期：", self.start_date_edit)
+
+        # 结束日期（可选，勾选后启用）
+        end_date_layout = QHBoxLayout()
+        self.end_check = QCheckBox("已结束")
+        self.end_check.toggled.connect(self._on_end_check_toggled)
+        end_date_layout.addWidget(self.end_check)
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDate(QDate.currentDate())
+        self.end_date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.end_date_edit.setEnabled(False)
+        end_date_layout.addWidget(self.end_date_edit)
+        end_date_layout.addStretch()
+        form_layout.addRow("结束日期：", end_date_layout)
 
         self.cycle_combo = QComboBox()
         for cycle in BILLING_CYCLES:
@@ -114,10 +128,10 @@ class SubscriptionTab(QWidget):
         table_layout = QVBoxLayout(table_group)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
             "ID", "服务名称", "开始日期", "计费周期",
-            "金额", "月均成本", "下次扣费", "备注",
+            "金额", "月均成本", "下次扣费", "状态", "备注",
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -126,9 +140,9 @@ class SubscriptionTab(QWidget):
         self.table.setColumnHidden(0, True)
         # 列宽策略：内容自适应 + 备注列拉伸
         header = self.table.horizontalHeader()
-        for col in range(1, 7):
+        for col in range(1, 8):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
         self.table.itemDoubleClicked.connect(self._on_row_double_clicked)
 
         table_layout.addWidget(self.table)
@@ -162,10 +176,21 @@ class SubscriptionTab(QWidget):
         subs = [s for s in self._all_rows
                 if not keyword or keyword in s["service_name"].lower()]
 
+        from datetime import date as dt_date
+
         self.table.setRowCount(len(subs))
         for row, sub in enumerate(subs):
             monthly_cost = calc_monthly_subscription_cost(sub)
             next_billing = calc_next_billing_date(sub)
+
+            end_date_str = sub.get("end_date", "")
+            if end_date_str:
+                end_date = dt_date.fromisoformat(end_date_str)
+                status = "已结束" if end_date <= dt_date.today() else "进行中"
+            else:
+                status = "进行中"
+
+            next_billing_text = next_billing.strftime("%Y-%m-%d") if next_billing else "—"
 
             items = [
                 str(sub["id"]),
@@ -174,16 +199,15 @@ class SubscriptionTab(QWidget):
                 BILLING_CYCLE_LABELS.get(sub["billing_cycle"], sub["billing_cycle"]),
                 format_currency(sub["amount"]),
                 format_currency(monthly_cost),
-                next_billing.strftime("%Y-%m-%d"),
+                next_billing_text,
+                status,
                 sub.get("notes", ""),
             ]
 
             for col, text in enumerate(items):
                 item = QTableWidgetItem(text)
-                if col == 6:  # 下次扣费日期
-                    from datetime import date as dt_date
-                    if next_billing <= dt_date.today():
-                        item.setForeground(Qt.GlobalColor.red)
+                if col == 6 and next_billing is not None and next_billing <= dt_date.today():
+                    item.setForeground(Qt.GlobalColor.red)
                 self.table.setItem(row, col, item)
 
         self.table.resizeColumnsToContents()
@@ -194,22 +218,31 @@ class SubscriptionTab(QWidget):
 
     # ── 表单操作 ─────────────────────────────────
 
+    def _on_end_check_toggled(self, checked: bool) -> None:
+        self.end_date_edit.setEnabled(checked)
+
     def _clear_form(self) -> None:
         self._editing_id = None
         self.name_edit.clear()
         self.start_date_edit.setDate(QDate.currentDate())
+        self.end_check.setChecked(False)
+        self.end_date_edit.setDate(QDate.currentDate())
         self.cycle_combo.setCurrentIndex(0)
         self.amount_spin.setValue(0)
         self.notes_edit.clear()
         self.add_btn.setText("添加")
 
     def _get_form_data(self) -> dict:
+        end_date = ""
+        if self.end_check.isChecked():
+            end_date = self.end_date_edit.date().toString("yyyy-MM-dd")
         return {
             "service_name": self.name_edit.text().strip(),
             "start_date": self.start_date_edit.date().toString("yyyy-MM-dd"),
             "billing_cycle": self.cycle_combo.currentData(),
             "amount": self.amount_spin.value(),
             "notes": self.notes_edit.toPlainText().strip(),
+            "end_date": end_date,
         }
 
     def _validate_form(self, data: dict) -> bool:
@@ -262,6 +295,12 @@ class SubscriptionTab(QWidget):
         self.start_date_edit.setDate(
             QDate.fromString(sub["start_date"], "yyyy-MM-dd")
         )
+        end_date_str = sub.get("end_date", "")
+        if end_date_str:
+            self.end_check.setChecked(True)
+            self.end_date_edit.setDate(QDate.fromString(end_date_str, "yyyy-MM-dd"))
+        else:
+            self.end_check.setChecked(False)
         idx = self.cycle_combo.findData(sub["billing_cycle"])
         if idx >= 0:
             self.cycle_combo.setCurrentIndex(idx)
