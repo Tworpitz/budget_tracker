@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QMessageBox, QAbstractItemView,
 )
 from PySide6.QtCore import Qt, QDate, Signal
+from db.validation import validate_subscription
+from ui.error_handling import run_database_write
 
 from db.database import (
     add_subscription, update_subscription, delete_subscription,
@@ -143,8 +145,13 @@ class SubscriptionTab(QWidget):
         self.table.setRowCount(len(subs))
 
         for row, sub in enumerate(subs):
-            monthly_cost = calc_monthly_subscription_cost(sub)
-            next_billing = calc_next_billing_date(sub)
+            error = None
+            try:
+                monthly_cost = calc_monthly_subscription_cost(sub)
+                next_billing = calc_next_billing_date(sub)
+            except ValueError as exc:
+                error = str(exc)
+                monthly_cost = next_billing = None
 
             items = [
                 str(sub["id"]),
@@ -152,17 +159,20 @@ class SubscriptionTab(QWidget):
                 sub["start_date"],
                 BILLING_CYCLE_LABELS.get(sub["billing_cycle"], sub["billing_cycle"]),
                 f"¥ {sub['amount']:,.2f}",
-                f"¥ {monthly_cost:,.2f}",
-                next_billing.strftime("%Y-%m-%d"),
+                f"¥ {monthly_cost:,.2f}" if monthly_cost is not None else "数据有误",
+                next_billing.strftime("%Y-%m-%d") if next_billing else "数据有误",
                 sub.get("notes", ""),
             ]
 
             for col, text in enumerate(items):
                 item = QTableWidgetItem(text)
-                if col == 6:  # 下次扣费日期
+                if col == 6 and next_billing is not None:  # 下次扣费日期
                     from datetime import date as dt_date
                     if next_billing <= dt_date.today():
                         item.setForeground(Qt.GlobalColor.red)
+                if error:
+                    item.setToolTip(error)
+                    item.setForeground(Qt.GlobalColor.red)
                 self.table.setItem(row, col, item)
 
         self.table.resizeColumnsToContents()
@@ -188,13 +198,10 @@ class SubscriptionTab(QWidget):
         }
 
     def _validate_form(self, data: dict) -> bool:
-        if not data["service_name"]:
-            QMessageBox.warning(self, "提示", "请输入服务名称。")
-            self.name_edit.setFocus()
-            return False
-        if data["amount"] <= 0:
-            QMessageBox.warning(self, "提示", "金额必须大于 0。")
-            self.amount_spin.setFocus()
+        try:
+            validate_subscription(**data)
+        except ValueError as exc:
+            QMessageBox.warning(self, "输入有误", str(exc))
             return False
         return True
 
@@ -202,7 +209,8 @@ class SubscriptionTab(QWidget):
         data = self._get_form_data()
         if not self._validate_form(data):
             return
-        add_subscription(**data)
+        if not run_database_write(self, add_subscription, **data):
+            return
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -214,7 +222,8 @@ class SubscriptionTab(QWidget):
         data = self._get_form_data()
         if not self._validate_form(data):
             return
-        update_subscription(self._editing_id, **data)
+        if not run_database_write(self, update_subscription, self._editing_id, **data):
+            return
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -266,7 +275,8 @@ class SubscriptionTab(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            delete_subscription(sub_id)
+            if not run_database_write(self, delete_subscription, sub_id):
+                return
             self._clear_form()
             self._load_table()
             self.data_changed.emit()

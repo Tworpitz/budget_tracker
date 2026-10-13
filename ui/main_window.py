@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QStatusBar, QMessageBox,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QAction
+from PySide6.QtGui import QFont, QAction, QCursor, QGuiApplication
 
 from db.database import init_db
 from ui.asset_tab import AssetTab
@@ -28,6 +28,27 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._apply_stylesheet()
+
+    def show_on_screen(self) -> None:
+        """在当前屏幕的可用区域启动，包含窗口边框并避开任务栏。"""
+        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            self.show()
+            return
+
+        # 先创建原生窗口，取得边框尺寸并明确目标屏幕。
+        self.ensurePolished()
+        self.winId()
+        self.windowHandle().setScreen(screen)
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+
+        if frame.width() > available.width() or frame.height() > available.height():
+            self.showMaximized()
+        else:
+            self.show()
 
     # ── UI 构建 ─────────────────────────────────
 

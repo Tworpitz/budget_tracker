@@ -1,13 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
+"""Windows 单文件配置；入口为 packaging/build_windows.bat。"""
 
-datas = [('db', 'db'), ('calc', 'calc'), ('ui', 'ui')]
+from PyInstaller.utils.hooks import collect_data_files
+from pathlib import Path
+
+PROJECT_ROOT = Path(SPECPATH).resolve().parent
+
+datas = [(str(PROJECT_ROOT / name), name) for name in ('db', 'calc', 'ui')]
 datas += collect_data_files('matplotlib')
 
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    [str(PROJECT_ROOT / 'main.py')],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=datas,
     hiddenimports=['dateutil.relativedelta', 'matplotlib.backends.backend_qt5agg', 'matplotlib.backends.backend_qtagg'],

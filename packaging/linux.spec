@@ -1,20 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller spec for 固定资产与生活支出统计 (BudgetTracker).
-用法: pyinstaller budget.spec
-输出: dist/BudgetTracker/（~290MB 可移动文件夹）
+用法: bash packaging/build_linux.sh
+输出: dist/linux/BudgetTracker/
 """
 
 from PyInstaller.utils.hooks import collect_data_files
+from pathlib import Path
+
+PROJECT_ROOT = Path(SPECPATH).resolve().parent
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    [str(PROJECT_ROOT / 'main.py')],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[
-        ('db', 'db'),
-        ('calc', 'calc'),
-        ('ui', 'ui'),
+        (str(PROJECT_ROOT / 'db'), 'db'),
+        (str(PROJECT_ROOT / 'calc'), 'calc'),
+        (str(PROJECT_ROOT / 'ui'), 'ui'),
         *collect_data_files('matplotlib', subdir='mpl-data'),
     ],
     hiddenimports=[

@@ -1,37 +1,36 @@
 @echo off
-REM ============================================================
-REM  BudgetTracker Windows 打包脚本
-REM  前提: 已安装 Miniconda / Anaconda
-REM  输出: packaging\BudgetTracker.exe（单文件 ~150MB）
-REM ============================================================
-setlocal enabledelayedexpansion
+REM BudgetTracker Windows build. Output: dist\windows\BudgetTracker.exe
+setlocal
 cd /d "%~dp0\.."
 
-echo === 清理旧构建 ===
-if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
-
-echo === 创建 Windows conda 环境 ===
-call conda create -n budget-win python=3.11 -y 2>nul
-call conda activate budget-win
-
-echo === 安装依赖 ===
-pip install pyside6 matplotlib python-dateutil pyinstaller
-
-echo === PyInstaller 单文件打包（约 3-5 分钟）===
-pyinstaller --onefile --windowed --name BudgetTracker --add-data "db;db" --add-data "calc;calc" --add-data "ui;ui" --hidden-import dateutil.relativedelta --hidden-import matplotlib.backends.backend_qt5agg --hidden-import matplotlib.backends.backend_qtagg --collect-data matplotlib --exclude-module tkinter main.py
-
-echo.
-echo === 打包完成 ===
-if exist "dist\BudgetTracker.exe" (
-    echo 输出: %cd%\dist\BudgetTracker.exe
-    for %%A in ("dist\BudgetTracker.exe") do echo 大小: %%~zA bytes
-    echo.
-    echo 将 BudgetTracker.exe 复制到任意 Windows 机器双击即可运行。
-) else (
-    echo 打包失败，请检查错误信息。
+call conda run -n budget-win python --version >nul 2>&1
+if errorlevel 1 (
+    call conda create -n budget-win python=3.11 -y
+    if errorlevel 1 exit /b 1
 )
+call conda activate budget-win
+if errorlevel 1 exit /b 1
 
+echo === Installing dependencies ===
+python -m pip install pyside6 matplotlib python-dateutil pyinstaller
+if errorlevel 1 goto failed
+
+echo === Backing up legacy databases ===
+python -m db.storage --project-root . --backup-root backups
+if errorlevel 1 goto failed
+
+echo === Building Windows executable ===
+python -m PyInstaller --noconfirm --distpath dist\windows --workpath build\windows packaging\windows.spec
+if errorlevel 1 goto failed
+
+echo Output: %cd%\dist\windows\BudgetTracker.exe
+echo User data is stored separately in LOCALAPPDATA\BudgetTracker.
 call conda deactivate
 endlocal
-pause
+exit /b 0
+
+:failed
+echo Build failed. Existing databases and backups are preserved.
+call conda deactivate
+endlocal
+exit /b 1

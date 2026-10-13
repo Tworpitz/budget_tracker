@@ -13,7 +13,8 @@
 """
 
 import sys
-from PySide6.QtWidgets import QApplication
+import sqlite3
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import Qt
 
 from ui.main_window import MainWindow
@@ -29,8 +30,12 @@ def main():
     app.setApplicationName("BudgetTracker")
     app.setOrganizationName("BudgetApp")
 
-    window = MainWindow()
-    window.show()
+    try:
+        window = MainWindow()
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        QMessageBox.critical(None, "无法启动", f"数据库初始化或数据校验失败。\n{exc}")
+        sys.exit(1)
+    window.show_on_screen()
 
     sys.exit(app.exec())
 

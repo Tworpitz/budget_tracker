@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QMessageBox, QAbstractItemView,
 )
 from PySide6.QtCore import Qt, QDate, Signal
+from db.validation import validate_expense
+from ui.error_handling import run_database_write
 
 from db.database import (
     add_expense, update_expense, delete_expense,
@@ -169,13 +171,10 @@ class ExpenseTab(QWidget):
         }
 
     def _validate_form(self, data: dict) -> bool:
-        if not data["name"]:
-            QMessageBox.warning(self, "提示", "请输入开支名称。")
-            self.name_edit.setFocus()
-            return False
-        if data["amount"] <= 0:
-            QMessageBox.warning(self, "提示", "金额必须大于 0。")
-            self.amount_spin.setFocus()
+        try:
+            validate_expense(**data)
+        except ValueError as exc:
+            QMessageBox.warning(self, "输入有误", str(exc))
             return False
         return True
 
@@ -183,7 +182,8 @@ class ExpenseTab(QWidget):
         data = self._get_form_data()
         if not self._validate_form(data):
             return
-        add_expense(**data)
+        if not run_database_write(self, add_expense, **data):
+            return
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -195,7 +195,8 @@ class ExpenseTab(QWidget):
         data = self._get_form_data()
         if not self._validate_form(data):
             return
-        update_expense(self._editing_id, **data)
+        if not run_database_write(self, update_expense, self._editing_id, **data):
+            return
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -249,7 +250,8 @@ class ExpenseTab(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            delete_expense(exp_id)
+            if not run_database_write(self, delete_expense, exp_id):
+                return
             self._clear_form()
             self._load_table()
             self.data_changed.emit()

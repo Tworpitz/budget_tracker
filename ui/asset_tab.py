@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, Signal
 from datetime import date
 from dateutil.relativedelta import relativedelta
+from db.validation import validate_asset
+from ui.error_handling import run_database_write
 
 from db.database import (
     add_asset, update_asset, delete_asset,
@@ -165,36 +167,43 @@ class AssetTab(QWidget):
         self.table.setRowCount(len(assets))
 
         for row, asset in enumerate(assets):
-            monthly = calc_monthly_depreciation(asset)
-            accumulated = calc_accumulated_depreciation(asset)
-            current_val = calc_current_value(asset)
-            # 计算预期报废日期
-            purchase = date.fromisoformat(asset["purchase_date"])
-            scrap_date = purchase + relativedelta(months=asset["lifespan_months"])
+            error = None
+            try:
+                monthly = calc_monthly_depreciation(asset)
+                accumulated = calc_accumulated_depreciation(asset)
+                current_val = calc_current_value(asset)
+                purchase = date.fromisoformat(asset["purchase_date"])
+                scrap_date = purchase + relativedelta(months=asset["lifespan_months"])
+            except ValueError as exc:
+                error = str(exc)
+                monthly = accumulated = current_val = scrap_date = None
 
             items = [
                 str(asset["id"]),                      # 0: ID
                 asset["name"],                         # 1: 名称
                 asset["category"],                     # 2: 类别
                 asset["purchase_date"],                # 3: 购买日期
-                scrap_date.strftime("%Y-%m-%d"),       # 4: 预期报废
+                scrap_date.strftime("%Y-%m-%d") if scrap_date else "数据有误",
                 f"{asset['lifespan_months']} 个月",    # 5: 使用月数
                 f"¥ {asset['purchase_price']:,.2f}",   # 6: 购买价格
                 f"¥ {asset['salvage_value']:,.2f}",    # 7: 残值
-                f"¥ {monthly:,.2f}",                   # 8: 月折旧额
-                f"¥ {accumulated:,.2f}",               # 9: 累计折旧
-                f"¥ {current_val:,.2f}",               # 10: 当前净值
+                f"¥ {monthly:,.2f}" if monthly is not None else "数据有误",
+                f"¥ {accumulated:,.2f}" if accumulated is not None else "数据有误",
+                f"¥ {current_val:,.2f}" if current_val is not None else "数据有误",
                 asset.get("notes", ""),                # 11: 备注
             ]
 
             for col, text in enumerate(items):
                 item = QTableWidgetItem(text)
                 # 已报废的资产 → 当前净值灰显
-                if col == 10:
+                if col == 10 and current_val is not None:
                     if current_val <= asset.get("salvage_value", 0):
                         item.setForeground(Qt.GlobalColor.gray)
                 # 预期报废日期：已过期的标红
-                if col == 4 and scrap_date < date.today():
+                if col == 4 and scrap_date is not None and scrap_date < date.today():
+                    item.setForeground(Qt.GlobalColor.red)
+                if error:
+                    item.setToolTip(error)
                     item.setForeground(Qt.GlobalColor.red)
                 self.table.setItem(row, col, item)
 
@@ -227,18 +236,10 @@ class AssetTab(QWidget):
         }
 
     def _validate_form(self, data: dict) -> bool:
-        """简单校验。"""
-        if not data["name"]:
-            QMessageBox.warning(self, "提示", "请输入资产名称。")
-            self.name_edit.setFocus()
-            return False
-        if data["purchase_price"] <= 0:
-            QMessageBox.warning(self, "提示", "购买价格必须大于 0。")
-            self.price_spin.setFocus()
-            return False
-        if data["lifespan_months"] <= 0:
-            QMessageBox.warning(self, "提示", "使用月数必须大于 0。")
-            self.lifespan_spin.setFocus()
+        try:
+            validate_asset(**data)
+        except ValueError as exc:
+            QMessageBox.warning(self, "输入有误", str(exc))
             return False
         return True
 
@@ -248,7 +249,8 @@ class AssetTab(QWidget):
         if not self._validate_form(data):
             return
 
-        add_asset(**data)
+        if not run_database_write(self, add_asset, **data):
+            return
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -263,7 +265,8 @@ class AssetTab(QWidget):
         if not self._validate_form(data):
             return
 
-        update_asset(self._editing_id, **data)
+        if not run_database_write(self, update_asset, self._editing_id, **data):
+            return
         self._clear_form()
         self._load_table()
         self.data_changed.emit()
@@ -328,7 +331,8 @@ class AssetTab(QWidget):
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            delete_asset(asset_id)
+            if not run_database_write(self, delete_asset, asset_id):
+                return
             self._clear_form()
             self._load_table()
             self.data_changed.emit()

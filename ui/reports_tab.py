@@ -3,12 +3,13 @@
 """
 
 from datetime import date, timedelta
+import sqlite3
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QGroupBox, QLabel, QDateEdit, QComboBox, QPushButton,
     QTableWidget, QTableWidgetItem, QAbstractItemView,
-    QSizePolicy, QFrame,
+    QSizePolicy, QFrame, QMessageBox,
 )
 from PySide6.QtCore import Qt, QDate
 
@@ -213,21 +214,23 @@ class ReportsTab(QWidget):
         start_str = start.isoformat()
         end_str = end.isoformat()
 
-        # 获取数据
-        assets = get_all_assets()
-        subscriptions = get_all_subscriptions()
-        expenses = get_expenses_in_range(start_str, end_str)
-
-        view = self.view_combo.currentText()
-
-        if view == "按月统计":
-            stats = generate_monthly_stats(assets, subscriptions, expenses, start, end)
-            self._display_stats_table(stats, "month")
-            self._draw_bar_chart(stats, "month")
-        else:
-            stats = generate_weekly_stats(assets, subscriptions, expenses, start, end)
-            self._display_stats_table(stats, "week")
-            self._draw_bar_chart(stats, "week")
+        mode = "month" if self.view_combo.currentText() == "按月统计" else "week"
+        try:
+            assets = get_all_assets()
+            subscriptions = get_all_subscriptions()
+            expenses = get_expenses_in_range(start_str, end_str)
+            generate = generate_monthly_stats if mode == "month" else generate_weekly_stats
+            stats = generate(assets, subscriptions, expenses, start, end)
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            self.stats_table.setRowCount(0)
+            self.figure.clear()
+            self.canvas.draw()
+            for card in (self.card_depreciation, self.card_subscriptions, self.card_expenses, self.card_total):
+                self._update_summary_card(card, "数据有误")
+            QMessageBox.warning(self, "无法生成报告", f"请检查并修正数据后重试。\n{exc}")
+            return
+        self._display_stats_table(stats, mode)
+        self._draw_bar_chart(stats, mode)
 
         # 汇总
         total_dep = sum(s["depreciation"] for s in stats)
