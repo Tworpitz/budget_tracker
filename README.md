@@ -29,6 +29,16 @@
 
 ## 🚀 快速开始
 
+### WinUI 3 Windows 客户端
+
+新增的原生 Windows 客户端位于 `clients/winui/`，覆盖资产、订阅、日常开支和统计报告，兼容原 SQLite 账本。使用 .NET 8 SDK 构建：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/build_winui.ps1 -Verify -Launch
+```
+
+发布产物在 `dist/winui/`（需保留整个目录）。完整功能、数据迁移与验证说明见 [WinUI 客户端文档](clients/winui/README.md)。下方 Python 版运行方式保持可用。
+
 ### 开发环境
 
 ```bash

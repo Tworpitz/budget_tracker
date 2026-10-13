@@ -20,3 +20,8 @@ backups/
 # IDE
 .vscode/
 .idea/
+
+# .NET clients
+**/bin/
+**/obj/
+.vs/
