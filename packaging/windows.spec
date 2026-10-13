@@ -3,6 +3,8 @@
 
 from PyInstaller.utils.hooks import collect_data_files
 from pathlib import Path
+import os
+import pefile
 
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
 
@@ -23,6 +25,25 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# Recent Qt wheels use Windows' ICU API. PATH may also contain an unrelated
+# icuuc.dll (e.g. Poppler/Conda) with version-suffixed exports. Bundling that
+# library shadows the system DLL and makes QtWidgets fail to load. Only omit
+# it when the system library satisfies every ICU import of the bundled Qt.
+qt_core = next(Path(source) for dest, source, _ in a.binaries
+               if Path(dest).name.lower() == 'qt6core.dll')
+with pefile.PE(str(qt_core)) as qt_pe:
+    icu_imports = {entry.name for library in qt_pe.DIRECTORY_ENTRY_IMPORT
+                   if library.dll.lower() == b'icuuc.dll'
+                   for entry in library.imports if entry.name}
+system_icu = Path(os.environ['SystemRoot']) / 'System32' / 'icuuc.dll'
+if icu_imports and system_icu.is_file():
+    with pefile.PE(str(system_icu)) as system_pe:
+        system_exports = {entry.name for entry in system_pe.DIRECTORY_ENTRY_EXPORT.symbols}
+    if icu_imports <= system_exports:
+        a.binaries = [(dest, source, kind) for dest, source, kind in a.binaries
+                      if Path(dest).name.lower() != 'icuuc.dll']
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
